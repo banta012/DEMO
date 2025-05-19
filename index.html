@@ -1,0 +1,1406 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>تطبيق توزيع القياسات</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.6/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fadeIn {
+      animation: fadeIn 0.5s ease-out;
+    }
+    .table-row:nth-child(even) {
+      background-color: #f9fafb;
+    }
+    .table-row:hover {
+      background-color: #e5e7eb;
+      transition: background-color 0.2s;
+    }
+    .input-field {
+      transition: all 0.3s;
+    }
+    .input-field:focus {
+      border-color: #f97316;
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+    }
+    .btn {
+      transition: all 0.3s;
+    }
+    .alert {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      animation: slideIn 0.3s ease-out;
+    }
+    @keyframes slideIn {
+      from { transform: translateX(100%); }
+      to { transform: translateX(0); }
+    }
+    textarea {
+      resize: vertical;
+    }
+  </style>
+</head>
+<body>
+  <div id="root" className="min-h-screen bg-gradient-to-r from-blue-500 to-blue-700 font-sans"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // بيانات المستخدمين الافتراضية (مع إضافة مستخدمين جدد)
+    const initialUsers = [
+      { id: 1, username: "admin_new", password: "admin_pass", role: "admin", name: "أدمن 1" },
+      { id: 2, username: "admin_new2", password: "admin_pass2", role: "admin", name: "أدمن 2" },
+      { id: 3, username: "tech1_new", password: "tech_pass1", role: "technician", name: "عبده زقزوق" },
+      { id: 4, username: "tech2_new", password: "tech_pass2", role: "technician", name: "وائل الدندل" },
+      { id: 5, username: "tech3_new", password: "tech_pass3", role: "technician", name: "أمين الجويلي" },
+      { id: 6, username: "tech4_new", password: "tech_pass4", role: "technician", name: "خالد الصغير" },
+      { id: 7, username: "tech5_new", password: "tech_pass5", role: "technician", name: "محمد العنزي" },
+      { id: 8, username: "data1_new", password: "data_pass1", role: "data_entry", name: "مدخل بيانات 1" },
+      { id: 9, username: "data2_new", password: "data_pass2", role: "data_entry", name: "مدخل بيانات 2" },
+      { id: 10, username: "data3_new", password: "data_pass3", role: "data_entry", name: "مدخل بيانات 3" },
+    ];
+
+    // خيارات نوعية القياس
+    const measurementTypes = [
+      { value: "sofa", label: "صوفا" },
+      { value: "kitchen", label: "مطابخ" },
+      { value: "villa", label: "فيلا" },
+      { value: "project", label: "مشاريع" },
+      { value: "inspection", label: "معاينة" },
+    ];
+
+    // قائمة مناطق الكويت
+    const kuwaitAreas = [
+      { value: "الدسمة", label: "الدسمة" },
+      { value: "الدعية", label: "الدعية" },
+      { value: "الدوحة", label: "الدوحة" },
+      { value: "الشامية", label: "الشامية" },
+      { value: "الشرق", label: "الشرق" },
+      { value: "الصوابر", label: "الصوابر" },
+      { value: "العديلية", label: "العديلية" },
+      { value: "الفيحاء", label: "الفيحاء" },
+      { value: "القادسية", label: "القادسية" },
+      { value: "القبلة", label: "القبلة" },
+      { value: "المرقاب", label: "المرقاب" },
+      { value: "المنصورية", label: "المنصورية" },
+      { value: "النزهة", label: "النزهة" },
+      { value: "اليرموك", label: "اليرموك" },
+      { value: "بنيد القار", label: "بنيد القار" },
+      { value: "دسمان", label: "دسمان" },
+      { value: "كيفان", label: "كيفان" },
+      { value: "البدع", label: "البدع" },
+      { value: "الجابرية", label: "الجابرية" },
+      { value: "الرميثية", label: "الرميثية" },
+      { value: "الزهراء", label: "الزهراء" },
+      { value: "السالمية", label: "السالمية" },
+      { value: "الشعب", label: "الشعب" },
+      { value: "الصديق", label: "الصديق" },
+      { value: "بيان", label: "بيان" },
+      { value: "حطين", label: "حطين" },
+      { value: "حولي", label: "حولي" },
+      { value: "سلوى", label: "سلوى" },
+      { value: "ميدان حولي", label: "ميدان حولي" },
+      { value: "أبرق خيطان", label: "أبرق خيطان" },
+      { value: "الرابية", label: "الرابية" },
+      { value: "الرحاب", label: "الرحاب" },
+      { value: "الرقعي", label: "الرقعي" },
+      { value: "الري", label: "الري" },
+      { value: "العارضية", label: "العارضية" },
+      { value: "العمرية", label: "العمرية" },
+      { value: "الفردوس", label: "الفردوس" },
+      { value: "الفروانية", label: "الفروانية" },
+      { value: "جليب الشيوخ", label: "جليب الشيوخ" },
+      { value: "خيطان", label: "خيطان" },
+      { value: "أبو حليفة", label: "أبو حليفة" },
+      { value: "الأحمدي", label: "الأحمدي" },
+      { value: "الصباحية", label: "الصباحية" },
+      { value: "الظهر", label: "الظهر" },
+      { value: "العقيلة", label: "العقيلة" },
+      { value: "الفحيحيل", label: "الفحيحيل" },
+      { value: "الفنطاس", label: "الفنطاس" },
+      { value: "المقوع", label: "المقوع" },
+      { value: "المهبولة", label: "المهبولة" },
+      { value: "المنقف", label: "المنقف" },
+      { value: "هدية", label: "هدية" },
+      { value: "الجهراء القديمة", label: "الجهراء القديمة" },
+      { value: "الجهراء الجديدة", label: "الجهراء الجديدة" },
+      { value: "النعيم", label: "النعيم" },
+      { value: "القصر", label: "القصر" },
+      { value: "العيون", label: "العيون" },
+      { value: "تيماء", label: "تيماء" },
+      { value: "سعد العبدالله", label: "سعد العبدالله" },
+      { value: "كبد", label: "كبد" },
+      { value: "أبو فطيرة", label: "أبو فطيرة" },
+      { value: "العدان", label: "العدان" },
+      { value: "القرين", label: "القرين" },
+      { value: "القصور", label: "القصور" },
+      { value: "المسيلة", label: "المسيلة" },
+      { value: "صبحان", label: "صبحان" },
+      { value: "مبارك الكبير", label: "مبارك الكبير" },
+      { value: "واصلة", label: "واصلة" },
+    ];
+
+    // بيانات المهام الافتراضية
+    const initialTasks = [
+      {
+        id: 1,
+        clientName: "محمد أحمد",
+        phone: "0123456789",
+        invoice: "INV001",
+        address: { area: "السالمية", details: "بلوك 5، شارع 10، منزل 20" },
+        technicianId: 3,
+        status: "pending",
+        scheduleDate: "2025-05-18",
+        measurementType: "sofa",
+        technicianNotes: "",
+        files: [],
+      },
+      {
+        id: 2,
+        clientName: "سارة محمود",
+        phone: "0987654321",
+        invoice: "INV002",
+        address: { area: "حولي", details: "بلوك 3، شارع 15، منزل 12" },
+        technicianId: 4,
+        status: "pending",
+        scheduleDate: "2025-05-18",
+        measurementType: "kitchen",
+        technicianNotes: "",
+        files: [],
+      },
+    ];
+
+    // مكون لعرض رسائل التنبيه
+    const Alert = ({ message, type, onClose }) => {
+      useEffect(() => {
+        const timer = setTimeout(onClose, 3000);
+        return () => clearTimeout(timer);
+      }, [onClose]);
+
+      return (
+        <div
+          className={`alert px-4 py-2 rounded-lg text-white ${
+            type === "success" ? "bg-green-600" : "bg-red-600"
+          }`}
+        >
+          {message}
+        </div>
+      );
+    };
+
+    // مكون تسجيل الدخول
+    const Login = ({ setUser }) => {
+      const [username, setUsername] = useState("");
+      const [password, setPassword] = useState("");
+      const [error, setError] = useState("");
+      const [alert, setAlert] = useState(null);
+
+      const handleLogin = () => {
+        try {
+          const storedUsers = JSON.parse(localStorage.getItem("users")) || initialUsers;
+          const user = storedUsers.find(
+            (u) => u.username === username && u.password === password
+          );
+          if (user) {
+            setUser(user);
+            setAlert({ message: "تم تسجيل الدخول بنجاح!", type: "success" });
+            setError("");
+          } else {
+            setError("اسم المستخدم أو كلمة المرور غير صحيحة");
+            setAlert({ message: "خطأ في تسجيل الدخول!", type: "error" });
+          }
+        } catch (e) {
+          console.error("خطأ في تسجيل الدخول:", e);
+          setError("حدث خطأ أثناء تسجيل الدخول");
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      return (
+        <div className="flex items-center justify-center min-h-screen animate-fadeIn">
+          <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+            <h2 className="text-3xl font-bold mb-6 text-center text-blue-600">تسجيل الدخول</h2>
+            <div className="mb-4">
+              <label className="block text-gray-700 mb-1">اسم المستخدم</label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full px-4 py-2 border rounded-lg input-field"
+                placeholder="أدخل اسم المستخدم"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="block text-gray-700 mb-1">كلمة المرور</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-2 border rounded-lg input-field"
+                placeholder="أدخل كلمة المرور"
+              />
+            </div>
+            {error && <p className="text-red-500 mb-4 text-center">{error}</p>}
+            <button
+              onClick={handleLogin}
+              className="w-full bg-blue-600 text-white py-2 rounded-lg btn hover:bg-orange-500"
+            >
+              <i className="fas fa-sign-in-alt mr-2"></i>تسجيل الدخول
+            </button>
+            {alert && (
+              <Alert
+                message={alert.message}
+                type={alert.type}
+                onClose={() => setAlert(null)}
+              />
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // مكون واجهة إدخال البيانات
+    const DataEntryDashboard = ({ tasks, setTasks, user, logout }) => {
+      const [clientName, setClientName] = useState("");
+      const [phone, setPhone] = useState("");
+      const [invoice, setInvoice] = useState("");
+      const [area, setArea] = useState("");
+      const [addressDetails, setAddressDetails] = useState("");
+      const [scheduleDate, setScheduleDate] = useState("");
+      const [measurementType, setMeasurementType] = useState("");
+      const [files, setFiles] = useState([]);
+      const [alert, setAlert] = useState(null);
+
+      const addTask = () => {
+        try {
+          if (!clientName || !phone || !invoice || !area || !addressDetails || !scheduleDate || !measurementType) {
+            setAlert({ message: "يرجى ملء جميع الحقول!", type: "error" });
+            return;
+          }
+
+          const newTask = {
+            id: tasks.length + 1,
+            clientName,
+            phone,
+            invoice,
+            address: { area, details: addressDetails },
+            technicianId: null,
+            status: "pending",
+            scheduleDate,
+            measurementType,
+            technicianNotes: "",
+            files: files.map((file) => ({
+              name: file.name,
+              type: file.type,
+              data: file.data,
+            })),
+          };
+          const updatedTasks = [...tasks, newTask];
+          setTasks(updatedTasks);
+          localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+          setAlert({ message: "تم إضافة المهمة بنجاح!", type: "success" });
+
+          setClientName("");
+          setPhone("");
+          setInvoice("");
+          setArea("");
+          setAddressDetails("");
+          setScheduleDate("");
+          setMeasurementType("");
+          setFiles([]);
+        } catch (e) {
+          console.error("خطأ في إضافة المهمة:", e);
+          setAlert({ message: "حدث خطأ أثناء إضافة المهمة!", type: "error" });
+        }
+      };
+
+      const handleFileUpload = (e) => {
+        try {
+          const uploadedFiles = Array.from(e.target.files);
+          uploadedFiles.forEach((file) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              setFiles((prev) => [
+                ...prev,
+                {
+                  name: file.name,
+                  type: file.type,
+                  data: reader.result,
+                },
+              ]);
+            };
+            reader.readAsDataURL(file);
+          });
+        } catch (e) {
+          console.error("خطأ في رفع الملف:", e);
+          setAlert({ message: "حدث خطأ أثناء رفع الملف!", type: "error" });
+        }
+      };
+
+      const deleteFile = (fileName) => {
+        setFiles((prev) => prev.filter((file) => file.name !== fileName));
+      };
+
+      const cancelTask = (id) => {
+        if (!window.confirm("هل أنت متأكد من إلغاء المهمة؟")) return;
+        try {
+          const updatedTasks = tasks.filter((task) => task.id !== id);
+          setTasks(updatedTasks);
+          localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+          setAlert({ message: "تم إلغاء المهمة بنجاح!", type: "success" });
+        } catch (e) {
+          console.error("خطأ في إلغاء المهمة:", e);
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      const userTasks = tasks.filter((task) => task.technicianId === null);
+
+      return (
+        <div className="p-6 animate-fadeIn">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-3xl font-bold text-white">إدخال بيانات المهام</h2>
+            <button
+              onClick={logout}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+            >
+              <i className="fas fa-sign-out-alt mr-2"></i>تسجيل الخروج
+            </button>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-lg mb-6">
+            <h3 className="text-xl font-semibold mb-4 text-blue-600">إضافة مهمة جديدة</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <input
+                type="text"
+                placeholder="اسم العميل"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <input
+                type="text"
+                placeholder="رقم الهاتف"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <input
+                type="text"
+                placeholder="رقم الفاتورة"
+                value={invoice}
+                onChange={(e) => setInvoice(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <select
+                value={area}
+                onChange={(e) => setArea(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              >
+                <option value="">اختر المنطقة</option>
+                {kuwaitAreas.map((area) => (
+                  <option key={area.value} value={area.value}>
+                    {area.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="تفاصيل العنوان (بلوك، شارع، منزل)"
+                value={addressDetails}
+                onChange={(e) => setAddressDetails(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <input
+                type="date"
+                value={scheduleDate}
+                onChange={(e) => setScheduleDate(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <select
+                value={measurementType}
+                onChange={(e) => setMeasurementType(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              >
+                <option value="">اختر نوعية القياس</option>
+                {measurementTypes.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+              <div className="col-span-2">
+                <label className="block text-gray-700 mb-1">رفع ملفات</label>
+                <input
+                  type="file"
+                  multiple
+                  onChange={handleFileUpload}
+                  className="w-full px-4 py-2 border rounded-lg input-field"
+                />
+                {files.length > 0 && (
+                  <div className="mt-2">
+                    <h4 className="text-sm font-semibold text-blue-600">الملفات المرفوعة:</h4>
+                    <ul className="list-disc pl-5">
+                      {files.map((file) => (
+                        <li key={file.name} className="flex justify-between items-center">
+                          <span>{file.name} ({file.type})</span>
+                          <button
+                            onClick={() => deleteFile(file.name)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <i className="fas fa-trash"></i>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={addTask}
+              className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+            >
+              <i className="fas fa-plus mr-2"></i>إضافة المهمة
+            </button>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-lg">
+            <h3 className="text-xl font-semibold mb-4 text-blue-600">المهام المضافة</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-blue-600 text-white">
+                    <th className="p-3">اسم العميل</th>
+                    <th className="p-3">رقم الهاتف</th>
+                    <th className="p-3">رقم الفاتورة</th>
+                    <th className="p-3">العنوان</th>
+                    <th className="p-3">الحالة</th>
+                    <th className="p-3">التاريخ</th>
+                    <th className="p-3">نوع القياس</th>
+                    <th className="p-3">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {userTasks.map((task) => (
+                    <tr key={task.id} className="table-row">
+                      <td className="p-3">{task.clientName}</td>
+                      <td className="p-3">{task.phone}</td>
+                      <td className="p-3">{task.invoice}</td>
+                      <td className="p-3">{`${task.address.area}, ${task.address.details}`}</td>
+                      <td className="p-3">
+                        {task.status === "pending" ? "قيد الانتظار" : task.status === "completed" ? "مكتمل" : "مؤجل"}
+                      </td>
+                      <td className="p-3">{task.scheduleDate}</td>
+                      <td className="p-3">
+                        {measurementTypes.find((type) => type.value === task.measurementType)?.label || task.measurementType}
+                      </td>
+                      <td className="p-3">
+                        <button
+                          onClick={() => cancelTask(task.id)}
+                          className="bg-red-600 text-white px-3 py-1 rounded-lg btn hover:bg-orange-500"
+                        >
+                          <i className="fas fa-times mr-1"></i>إلغاء
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {alert && (
+              <Alert
+                message={alert.message}
+                type={alert.type}
+                onClose={() => setAlert(null)}
+              />
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // مكون واجهة الأدمن
+    const AdminDashboard = ({ tasks, setTasks, users, setUsers, logout }) => {
+      const [clientName, setClientName] = useState("");
+      const [phone, setPhone] = useState("");
+      const [invoice, setInvoice] = useState("");
+      const [area, setArea] = useState("");
+      const [addressDetails, setAddressDetails] = useState("");
+      const [scheduleDate, setScheduleDate] = useState("");
+      const [measurementType, setMeasurementType] = useState("");
+      const [technicianId, setTechnicianId] = useState("");
+      const [files, setFiles] = useState([]);
+      const [editingTask, setEditingTask] = useState(null);
+      const [editingUser, setEditingUser] = useState(null);
+      const [newUsername, setNewUsername] = useState("");
+      const [newPassword, setNewPassword] = useState("");
+      const [selectedDate, setSelectedDate] = useState(null);
+      const [filterStatus, setFilterStatus] = useState(null);
+      const [alert, setAlert] = useState(null);
+
+      const addOrUpdateTask = () => {
+        try {
+          if (!clientName || !phone || !invoice || !area || !addressDetails || !scheduleDate || !measurementType || !technicianId) {
+            setAlert({ message: "يرجى ملء جميع الحقول!", type: "error" });
+            return;
+          }
+
+          let updatedTasks;
+          if (editingTask) {
+            updatedTasks = tasks.map((task) =>
+              task.id === editingTask.id
+                ? {
+                    ...task,
+                    clientName,
+                    phone,
+                    invoice,
+                    address: { area, details: addressDetails },
+                    technicianId: parseInt(technicianId),
+                    scheduleDate,
+                    measurementType,
+                    files: files.map((file) => ({
+                      name: file.name,
+                      type: file.type,
+                      data: file.data,
+                    })),
+                  }
+                : task
+            );
+            setAlert({ message: "تم تحديث المهمة بنجاح!", type: "success" });
+          } else {
+            const newTask = {
+              id: tasks.length + 1,
+              clientName,
+              phone,
+              invoice,
+              address: { area, details: addressDetails },
+              technicianId: parseInt(technicianId),
+              status: "pending",
+              scheduleDate,
+              measurementType,
+              technicianNotes: "",
+              files: files.map((file) => ({
+                name: file.name,
+                type: file.type,
+                data: file.data,
+              })),
+            };
+            updatedTasks = [...tasks, newTask];
+            setAlert({ message: "تم إضافة المهمة بنجاح!", type: "success" });
+          }
+          setTasks(updatedTasks);
+          localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+          setEditingTask(null);
+          setClientName("");
+          setPhone("");
+          setInvoice("");
+          setArea("");
+          setAddressDetails("");
+          setScheduleDate("");
+          setMeasurementType("");
+          setTechnicianId("");
+          setFiles([]);
+        } catch (e) {
+          console.error("خطأ في إضافة/تحديث المهمة:", e);
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      const editTask = (task) => {
+        setEditingTask(task);
+        setClientName(task.clientName);
+        setPhone(task.phone);
+        setInvoice(task.invoice);
+        setArea(task.address.area);
+        setAddressDetails(task.address.details);
+        setScheduleDate(task.scheduleDate);
+        setMeasurementType(task.measurementType);
+        setTechnicianId(task.technicianId ? task.technicianId.toString() : "");
+        setFiles(task.files || []);
+      };
+
+      const deleteTask = (id) => {
+        if (!window.confirm("هل أنت متأكد من حذف المهمة؟")) return;
+        try {
+          const updatedTasks = tasks.filter((task) => task.id !== id);
+          setTasks(updatedTasks);
+          localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+          setAlert({ message: "تم حذف المهمة بنجاح!", type: "success" });
+        } catch (e) {
+          console.error("خطأ في حذف المهمة:", e);
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      const handleFileUpload = (e) => {
+        try {
+          const uploadedFiles = Array.from(e.target.files);
+          uploadedFiles.forEach((file) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              setFiles((prev) => [
+                ...prev,
+                {
+                  name: file.name,
+                  type: file.type,
+                  data: reader.result,
+                },
+              ]);
+            };
+            reader.readAsDataURL(file);
+          });
+        } catch (e) {
+          console.error("خطأ في رفع الملف:", e);
+          setAlert({ message: "حدث خطأ أثناء رفع الملف!", type: "error" });
+        }
+      };
+
+      const deleteFile = (fileName) => {
+        setFiles((prev) => prev.filter((file) => file.name !== fileName));
+      };
+
+      const editUser = (user) => {
+        setEditingUser(user);
+        setNewUsername(user.username);
+        setNewPassword(user.password);
+      };
+
+      const updateUser = () => {
+        try {
+          if (!newUsername || !newPassword) {
+            setAlert({ message: "يرجى ملء جميع الحقول!", type: "error" });
+            return;
+          }
+          const updatedUsers = users.map((user) =>
+            user.id === editingUser.id
+              ? { ...user, username: newUsername, password: newPassword }
+              : user
+          );
+          setUsers(updatedUsers);
+          localStorage.setItem("users", JSON.stringify(updatedUsers));
+          setAlert({ message: "تم تحديث المستخدم بنجاح!", type: "success" });
+          setEditingUser(null);
+          setNewUsername("");
+          setNewPassword("");
+        } catch (e) {
+          console.error("خطأ في تحديث المستخدم:", e);
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      const filteredTasks = tasks.filter((task) => {
+        if (selectedDate && task.scheduleDate !== selectedDate) return false;
+        if (filterStatus && task.status !== filterStatus) return false;
+        return true;
+      });
+
+      return (
+        <div className="p-6 animate-fadeIn">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-3xl font-bold text-white">لوحة تحكم الأدمن</h2>
+            <button
+              onClick={logout}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+            >
+              <i className="fas fa-sign-out-alt mr-2"></i>تسجيل الخروج
+            </button>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-lg mb-6">
+            <h3 className="text-xl font-semibold mb-4 text-blue-600">
+              {editingTask ? "تعديل المهمة" : "إضافة مهمة جديدة"}
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <input
+                type="text"
+                placeholder="اسم العميل"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <input
+                type="text"
+                placeholder="رقم الهاتف"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <input
+                type="text"
+                placeholder="رقم الفاتورة"
+                value={invoice}
+                onChange={(e) => setInvoice(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <select
+                value={area}
+                onChange={(e) => setArea(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              >
+                <option value="">اختر المنطقة</option>
+                {kuwaitAreas.map((area) => (
+                  <option key={area.value} value={area.value}>
+                    {area.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="تفاصيل العنوان (بلوك، شارع، منزل)"
+                value={addressDetails}
+                onChange={(e) => setAddressDetails(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <input
+                type="date"
+                value={scheduleDate}
+                onChange={(e) => setScheduleDate(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              />
+              <select
+                value={measurementType}
+                onChange={(e) => setMeasurementType(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              >
+                <option value="">اختر نوعية القياس</option>
+                {measurementTypes.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={technicianId}
+                onChange={(e) => setTechnicianId(e.target.value)}
+                className="px-4 py-2 border rounded-lg input-field"
+              >
+                <option value="">اختر الفني</option>
+                {users
+                  .filter((user) => user.role === "technician")
+                  .map((tech) => (
+                    <option key={tech.id} value={tech.id}>
+                      {tech.name}
+                    </option>
+                  ))}
+              </select>
+              <div className="col-span-2">
+                <label className="block text-gray-700 mb-1">رفع ملفات</label>
+                <input
+                  type="file"
+                  multiple
+                  onChange={handleFileUpload}
+                  className="w-full px-4 py-2 border rounded-lg input-field"
+                />
+                {files.length > 0 && (
+                  <div className="mt-2">
+                    <h4 className="text-sm font-semibold text-blue-600">الملفات المرفوعة:</h4>
+                    <ul className="list-disc pl-5">
+                      {files.map((file) => (
+                        <li key={file.name} className="flex justify-between items-center">
+                          <span>{file.name} ({file.type})</span>
+                          <button
+                            onClick={() => deleteFile(file.name)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <i className="fas fa-trash"></i>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="mt-4 flex space-x-4">
+              <button
+                onClick={addOrUpdateTask}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+              >
+                <i className="fas fa-save mr-2"></i>
+                {editingTask ? "تحديث المهمة" : "إضافة المهمة"}
+              </button>
+              {editingTask && (
+                <button
+                  onClick={() => {
+                    setEditingTask(null);
+                    setClientName("");
+                    setPhone("");
+                    setInvoice("");
+                    setArea("");
+                    setAddressDetails("");
+                    setScheduleDate("");
+                    setMeasurementType("");
+                    setTechnicianId("");
+                    setFiles([]);
+                  }}
+                  className="bg-gray-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+                >
+                  <i className="fas fa-times mr-2"></i>إلغاء
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-lg mb-6">
+            <h3 className="text-xl font-semibold mb-4 text-blue-600">إدارة المستخدمين</h3>
+            {editingUser ? (
+              <div>
+                <h4 className="text-lg font-semibold mb-2 text-blue-600">
+                  تعديل بيانات المستخدم: {editingUser.name}
+                </h4>
+                <input
+                  type="text"
+                  placeholder="اسم المستخدم الجديد"
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  className="px-4 py-2 border rounded-lg input-field mb-2 w-full"
+                />
+                <input
+                  type="password"
+                  placeholder="كلمة المرور الجديدة"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="px-4 py-2 border rounded-lg input-field mb-2 w-full"
+                />
+                <div className="flex space-x-4">
+                  <button
+                    onClick={updateUser}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+                  >
+                    <i className="fas fa-save mr-2"></i>تحديث المستخدم
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingUser(null);
+                      setNewUsername("");
+                      setNewPassword("");
+                    }}
+                    className="bg-gray-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+                  >
+                    <i className="fas fa-times mr-2"></i>إلغاء
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-blue-600 text-white">
+                    <th className="p-3">الاسم</th>
+                    <th className="p-3">اسم المستخدم</th>
+                    <th className="p-3">الدور</th>
+                    <th className="p-3">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((user) => (
+                    <tr key={user.id} className="table-row">
+                      <td className="p-3">{user.name}</td>
+                      <td className="p-3">{user.username}</td>
+                      <td className="p-3">
+                        {user.role === "admin" ? "أدمن" : user.role === "technician" ? "فني" : "مدخل بيانات"}
+                      </td>
+                      <td className="p-3">
+                        <button
+                          onClick={() => editUser(user)}
+                          className="bg-yellow-500 text-white px-3 py-1 rounded-lg btn hover:bg-orange-500"
+                        >
+                          <i className="fas fa-edit mr-1"></i>تعديل
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-lg">
+            <h3 className="text-xl font-semibold mb-4 text-blue-600">المهام</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-gray-700 mb-1">تصفية حسب التاريخ</label>
+                <input
+                  type="date"
+                  value={selectedDate || ""}
+                  onChange={(e) => setSelectedDate(e.target.value || null)}
+                  className="px-4 py-2 border rounded-lg input-field w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-700 mb-1">تصفية حسب الحالة</label>
+                <select
+                  value={filterStatus || ""}
+                  onChange={(e) => setFilterStatus(e.target.value || null)}
+                  className="px-4 py-2 border rounded-lg input-field w-full"
+                >
+                  <option value="">الكل</option>
+                  <option value="pending">قيد الانتظار</option>
+                  <option value="completed">مكتمل</option>
+                  <option value="postponed">مؤجل</option>
+                </select>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-blue-600 text-white">
+                    <th className="p-3">اسم العميل</th>
+                    <th className="p-3">رقم الهاتف</th>
+                    <th className="p-3">رقم الفاتورة</th>
+                    <th className="p-3">العنوان</th>
+                    <th className="p-3">الفني</th>
+                    <th className="p-3">الحالة</th>
+                    <th className="p-3">التاريخ</th>
+                    <th className="p-3">نوع القياس</th>
+                    <th className="p-3">ملاحظات الفني</th>
+                    <th className="p-3">الملفات</th>
+                    <th className="p-3">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTasks.map((task) => (
+                    <tr key={task.id} className="table-row">
+                      <td className="p-3">{task.clientName}</td>
+                      <td className="p-3">{task.phone}</td>
+                      <td className="p-3">{task.invoice}</td>
+                      <td className="p-3">{`${task.address.area}, ${task.address.details}`}</td>
+                      <td className="p-3">
+                        {task.technicianId
+                          ? users.find((u) => u.id === task.technicianId)?.name || "غير معين"
+                          : "غير معين"}
+                      </td>
+                      <td className="p-3">
+                        {task.status === "pending" ? "قيد الانتظار" : task.status === "completed" ? "مكتمل" : "مؤجل"}
+                      </td>
+                      <td className="p-3">{task.scheduleDate}</td>
+                      <td className="p-3">
+                        {measurementTypes.find((type) => type.value === task.measurementType)?.label || task.measurementType}
+                      </td>
+                      <td className="p-3">{task.technicianNotes || "لا يوجد"}</td>
+                      <td className="p-3">
+                        {task.files && task.files.length > 0 ? (
+                          <ul className="list-disc pl-5">
+                            {task.files.map((file) => (
+                              <li key={file.name}>{file.name} ({file.type})</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          "لا يوجد"
+                        )}
+                      </td>
+                      <td className="p-3 flex space-x-2">
+                        <button
+                          onClick={() => editTask(task)}
+                          className="bg-yellow-500 text-white px-3 py-1 rounded-lg btn hover:bg-orange-500"
+                        >
+                          <i className="fas fa-edit mr-1"></i>تعديل
+                        </button>
+                        <button
+                          onClick={() => deleteTask(task.id)}
+                          className="bg-red-600 text-white px-3 py-1 rounded-lg btn hover:bg-orange-500"
+                        >
+                          <i className="fas fa-trash mr-1"></i>حذف
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {alert && (
+              <Alert
+                message={alert.message}
+                type={alert.type}
+                onClose={() => setAlert(null)}
+              />
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // مكون واجهة الفني
+    const TechnicianDashboard = ({ tasks, setTasks, user, logout }) => {
+      const [postponeDate, setPostponeDate] = useState("");
+      const [selectedTaskId, setSelectedTaskId] = useState(null);
+      const [notes, setNotes] = useState({});
+      const [files, setFiles] = useState({});
+      const [alert, setAlert] = useState(null);
+
+      const updateTaskStatus = (taskId, status) => {
+        try {
+          const updatedTasks = tasks.map((task) =>
+            task.id === taskId ? { ...task, status } : task
+          );
+          setTasks(updatedTasks);
+          localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+          setAlert({ message: "تم تحديث حالة المهمة!", type: "success" });
+        } catch (e) {
+          console.error("خطأ في تحديث حالة المهمة:", e);
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      const postponeTask = (taskId) => {
+        try {
+          if (!postponeDate) {
+            setAlert({ message: "يرجى اختيار تاريخ جديد!", type: "error" });
+            return;
+          }
+          const updatedTasks = tasks.map((task) =>
+            task.id === taskId
+              ? { ...task, status: "postponed", scheduleDate: postponeDate }
+              : task
+          );
+          setTasks(updatedTasks);
+          localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+          setAlert({ message: "تم تأجيل المهمة بنجاح!", type: "success" });
+          setPostponeDate("");
+          setSelectedTaskId(null);
+        } catch (e) {
+          console.error("خطأ في تأجيل المهمة:", e);
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      const cancelTask = (id) => {
+        if (!window.confirm("هل أنت متأكد من إلغاء المهمة؟")) return;
+        try {
+          const updatedTasks = tasks.filter((task) => task.id !== id);
+          setTasks(updatedTasks);
+          localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+          setAlert({ message: "تم إلغاء المهمة بنجاح!", type: "success" });
+        } catch (e) {
+          console.error("خطأ في إلغاء المهمة:", e);
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      const updateNotes = (taskId, note) => {
+        try {
+          const updatedTasks = tasks.map((task) =>
+            task.id === taskId ? { ...task, technicianNotes: note } : task
+          );
+          setTasks(updatedTasks);
+          localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+          setAlert({ message: "تم حفظ الملاحظات بنجاح!", type: "success" });
+        } catch (e) {
+          console.error("خطأ في حفظ الملاحظات:", e);
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      const handleFileUpload = (taskId, e) => {
+        try {
+          const uploadedFiles = Array.from(e.target.files);
+          const newFiles = [];
+          uploadedFiles.forEach((file) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              newFiles.push({
+                name: file.name,
+                type: file.type,
+                data: reader.result,
+              });
+              if (newFiles.length === uploadedFiles.length) {
+                const updatedTasks = tasks.map((task) =>
+                  task.id === taskId
+                    ? { ...task, files: [...(task.files || []), ...newFiles] }
+                    : task
+                );
+                setTasks(updatedTasks);
+                localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+                setFiles((prev) => ({
+                  ...prev,
+                  [taskId]: [...(prev[taskId] || []), ...newFiles],
+                }));
+                setAlert({ message: "تم رفع الملفات بنجاح!", type: "success" });
+              }
+            };
+            reader.readAsDataURL(file);
+          });
+        } catch (e) {
+          console.error("خطأ في رفع الملف:", e);
+          setAlert({ message: "حدث خطأ أثناء رفع الملف!", type: "error" });
+        }
+      };
+
+      const deleteFile = (taskId, fileName) => {
+        try {
+          const updatedTasks = tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  files: task.files.filter((file) => file.name !== fileName),
+                }
+              : task
+          );
+          setTasks(updatedTasks);
+          localStorage.setItem("tasks", JSON.stringify(updatedTasks));
+          setFiles((prev) => ({
+            ...prev,
+            [taskId]: prev[taskId].filter((file) => file.name !== fileName),
+          }));
+          setAlert({ message: "تم حذف الملف بنجاح!", type: "success" });
+        } catch (e) {
+          console.error("خطأ في حذف الملف:", e);
+          setAlert({ message: "حدث خطأ!", type: "error" });
+        }
+      };
+
+      const technicianTasks = tasks.filter((task) => task.technicianId === user.id);
+
+      return (
+        <div className="p-6 animate-fadeIn">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-3xl font-bold text-white">لوحة تحكم الفني: {user.name}</h2>
+            <button
+              onClick={logout}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+            >
+              <i className="fas fa-sign-out-alt mr-2"></i>تسجيل الخروج
+            </button>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-lg">
+            <h3 className="text-xl font-semibold mb-4 text-blue-600">المهام المعينة</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-blue-600 text-white">
+                    <th className="p-3">اسم العميل</th>
+                    <th className="p-3">رقم الهاتف</th>
+                    <th className="p-3">رقم الفاتورة</th>
+                    <th className="p-3">العنوان</th>
+                    <th className="p-3">الحالة</th>
+                    <th className="p-3">التاريخ</th>
+                    <th className="p-3">نوع القياس</th>
+                    <th className="p-3">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {technicianTasks.map((task) => (
+                    <tr key={task.id} className="table-row">
+                      <td className="p-3">{task.clientName}</td>
+                      <td className="p-3">{task.phone}</td>
+                      <td className="p-3">{task.invoice}</td>
+                      <td className="p-3">{`${task.address.area}, ${task.address.details}`}</td>
+                      <td className="p-3">
+                        {task.status === "pending" ? "قيد الانتظار" : task.status === "completed" ? "مكتمل" : "مؤجل"}
+                      </td>
+                      <td className="p-3">{task.scheduleDate}</td>
+                      <td className="p-3">
+                        {measurementTypes.find((type) => type.value === task.measurementType)?.label || task.measurementType}
+                      </td>
+                      <td className="p-3 flex space-x-2">
+                        <button
+                          onClick={() => updateTaskStatus(task.id, "completed")}
+                          className="bg-green-600 text-white px-3 py-1 rounded-lg btn hover:bg-orange-500"
+                          disabled={task.status === "completed"}
+                        >
+                          <i className="fas fa-check mr-1"></i>إكمال
+                        </button>
+                        <button
+                          onClick={() => setSelectedTaskId(task.id)}
+                          className="bg-yellow-500 text-white px-3 py-1 rounded-lg btn hover:bg-orange-500"
+                          disabled={task.status === "completed"}
+                        >
+                          <i className="fas fa-clock mr-1"></i>تأجيل
+                        </button>
+                        <button
+                          onClick={() => cancelTask(task.id)}
+                          className="bg-red-600 text-white px-3 py-1 rounded-lg btn hover:bg-orange-500"
+                          disabled={task.status === "completed"}
+                        >
+                          <i className="fas fa-times mr-1"></i>إلغاء
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {technicianTasks.map((task) => (
+              <div key={task.id} className="mt-4 p-4 bg-gray-50 rounded-lg">
+                <h4 className="text-lg font-semibold mb-2 text-blue-600">
+                  تفاصيل المهمة: {task.clientName}
+                </h4>
+                <div className="mb-4">
+                  <label className="block text-gray-700 mb-1">ملاحظات الفني</label>
+                  <textarea
+                    value={notes[task.id] || task.technicianNotes || ""}
+                    onChange={(e) => setNotes({ ...notes, [task.id]: e.target.value })}
+                    onBlur={() => updateNotes(task.id, notes[task.id] || task.technicianNotes || "")}
+                    className="w-full px-4 py-2 border rounded-lg input-field"
+                    placeholder="أدخل ملاحظاتك هنا..."
+                    rows="4"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-gray-700 mb-1">رفع ملفات</label>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(e) => handleFileUpload(task.id, e)}
+                    className="w-full px-4 py-2 border rounded-lg input-field"
+                  />
+                  {task.files && task.files.length > 0 && (
+                    <div className="mt-2">
+                      <h4 className="text-sm font-semibold text-blue-600">الملفات المرفوعة:</h4>
+                      <ul className="list-disc pl-5">
+                        {task.files.map((file) => (
+                          <li key={file.name} className="flex justify-between items-center">
+                            <span>{file.name} ({file.type})</span>
+                            <button
+                              onClick={() => deleteFile(task.id, file.name)}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              <i className="fas fa-trash"></i>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {selectedTaskId && (
+              <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                <h4 className="text-lg font-semibold mb-2 text-blue-600">تأجيل المهمة</h4>
+                <input
+                  type="date"
+                  value={postponeDate}
+                  onChange={(e) => setPostponeDate(e.target.value)}
+                  className="px-4 py-2 border rounded-lg input-field mb-2"
+                />
+                <div className="flex space-x-4">
+                  <button
+                    onClick={() => postponeTask(selectedTaskId)}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+                  >
+                    <i className="fas fa-save mr-2"></i>تأكيد التأجيل
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedTaskId(null);
+                      setPostponeDate("");
+                    }}
+                    className="bg-gray-600 text-white px-4 py-2 rounded-lg btn hover:bg-orange-500"
+                  >
+                    <i className="fas fa-times mr-2"></i>إلغاء
+                  </button>
+                </div>
+              </div>
+            )}
+            {alert && (
+              <Alert
+                message={alert.message}
+                type={alert.type}
+                onClose={() => setAlert(null)}
+              />
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // المكون الرئيسي
+    const App = () => {
+      const [user, setUser] = useState(null);
+      const [tasks, setTasks] = useState(() => {
+        try {
+          const savedTasks = localStorage.getItem("tasks");
+          return savedTasks ? JSON.parse(savedTasks) : initialTasks;
+        } catch (e) {
+          console.error("خطأ في تحميل المهام من localStorage:", e);
+          return initialTasks;
+        }
+      });
+      const [users, setUsers] = useState(() => {
+        try {
+          const savedUsers = localStorage.getItem("users");
+          return savedUsers ? JSON.parse(savedUsers) : initialUsers;
+        } catch (e) {
+          console.error("خطأ في تحميل المستخدمين من localStorage:", e);
+          return initialUsers;
+        }
+      });
+
+      const logout = () => {
+        setUser(null);
+      };
+
+      return (
+        <div>
+          {!user ? (
+            <Login setUser={setUser} />
+          ) : user.role === "admin" ? (
+            <AdminDashboard tasks={tasks} setTasks={setTasks} users={users} setUsers={setUsers} logout={logout} />
+          ) : user.role === "technician" ? (
+            <TechnicianDashboard tasks={tasks} setTasks={setTasks} user={user} logout={logout} />
+          ) : (
+            <DataEntryDashboard tasks={tasks} setTasks={setTasks} user={user} logout={logout} />
+          )}
+        </div>
+      );
+    };
+
+    // تشغيل التطبيق
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
